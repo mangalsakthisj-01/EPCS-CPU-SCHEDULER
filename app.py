@@ -1,567 +1,359 @@
-import streamlit as st
-import pandas as pd
+import io
+import zipfile
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import zipfile
-import io
-
-# =====================================================
-# PAGE CONFIGURATION
-# =====================================================
+import streamlit as st
 
 st.set_page_config(
-    page_title="Explainable AI CPU Scheduler",
+    page_title="EPCS — Explainable AI CPU Scheduler",
     page_icon="⚙️",
-    layout="wide"
+    layout="wide",
 )
 
-st.title("⚙️ Explainable AI CPU Scheduler")
+st.title("⚙️ EPCS — Explainable AI CPU Scheduler")
+st.subheader("Intelligent Scheduling | Performance Analysis | Explainable AI")
 st.caption(
-    "XGBoost Execution-Time Prediction | SHAP Explainability "
-    "| Intelligent CPU Scheduling"
+    "Upload the exported dashboard ZIP from the Kaggle notebook. "
+    "This dashboard visualizes exported results; it does not silently retrain the XGBoost model."
 )
+st.divider()
 
-st.markdown("---")
-
-
-# =====================================================
-# LOAD DASHBOARD DATA
-# =====================================================
-
-st.sidebar.header("📂 Dashboard Data")
-
-uploaded_zip = st.sidebar.file_uploader(
-    "Upload dashboard_data.zip",
-    type=["zip"]
-)
-
-if uploaded_zip is None:
-    st.info(
-        "Upload your updated dashboard_data.zip to display "
-        "the scheduling comparison and SHAP analysis."
-    )
-    st.stop()
-
-
-@st.cache_data
-def load_csv_files(zip_bytes):
-    data = {}
-
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as archive:
-        for filename in archive.namelist():
-
-            if filename.lower().endswith(".csv"):
+# ---------- Data loading ----------
+@st.cache_data(show_spinner=False)
+def load_zip_csvs(zip_bytes: bytes) -> dict[str, pd.DataFrame]:
+    data: dict[str, pd.DataFrame] = {}
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        for member in zf.namelist():
+            if member.lower().endswith(".csv") and not member.startswith("__MACOSX/"):
+                basename = Path(member).name.lower()
                 try:
-                    with archive.open(filename) as file:
-                        data[filename.split("/")[-1]] = pd.read_csv(file)
-                except Exception as error:
-                    st.warning(
-                        f"Could not read {filename}: {error}"
-                    )
-
+                    with zf.open(member) as f:
+                        data[basename] = pd.read_csv(f)
+                except Exception as exc:
+                    data[basename] = pd.DataFrame()
+                    st.warning(f"Could not read {basename}: {exc}")
     return data
 
 
-files = load_csv_files(uploaded_zip.getvalue())
+def as_numeric(df: pd.DataFrame, col: str) -> pd.Series | None:
+    if col not in df.columns:
+        return None
+    return pd.to_numeric(df[col], errors="coerce")
 
 
-def find_file(keyword):
-    """Find a CSV using part of its filename."""
-    for filename, dataframe in files.items():
-        if keyword.lower() in filename.lower():
-            return dataframe
+def mean_metric(df: pd.DataFrame | None, col: str) -> float:
+    if df is None or col not in df.columns:
+        return np.nan
+    values = pd.to_numeric(df[col], errors="coerce").dropna()
+    return float(values.mean()) if not values.empty else np.nan
 
+
+def get_job_id_col(df: pd.DataFrame) -> str | None:
+    for col in ("Job_ID", "Process_ID", "Job_ID ", "ProcessID", "JobID"):
+        if col in df.columns:
+            return col
     return None
 
 
-# =====================================================
-# LOAD INDIVIDUAL DATASETS
-# =====================================================
-
-epcs_df = files.get("epcs_results.csv")
-fcfs_df = files.get("fcfs_results.csv")
-sjf_df = files.get("sjf_results_713.csv")
-priority_df = files.get("priority_results.csv")
-rr_df = files.get("rr_results.csv")
-workload_df = files.get("scheduler_workload.csv")
-shap_df = files.get("shap_feature_importance.csv")
+def get_prediction_col(df: pd.DataFrame) -> str | None:
+    for col in ("Predicted_Execution_Time", "Predicted_Burst_Time", "Burst_Time", "Execution_Time(Seconds)"):
+        if col in df.columns:
+            return col
+    return None
 
 
-# =====================================================
-# SIDEBAR INFORMATION
-# =====================================================
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Available Files")
-
-for filename in files:
-    st.sidebar.write("✅ " + filename)
-
-
-# =====================================================
-# PROJECT OVERVIEW
-# =====================================================
-
-st.header("1. Project Overview")
-
-c1, c2, c3 = st.columns(3)
-
-c1.metric(
-    "Scheduling Algorithms",
-    sum(
-        df is not None
-        for df in [
-            fcfs_df, sjf_df, priority_df, rr_df, epcs_df
-        ]
-    )
-)
-
-c2.metric(
-    "SHAP Analysis",
-    "Available" if shap_df is not None else "Missing"
-)
-
-c3.metric(
-    "Workload Dataset",
-    f"{len(workload_df):,} jobs"
-    if workload_df is not None
-    else "Not loaded"
-)
-
-st.markdown(
-    """
-    This project predicts job execution time using XGBoost and
-    uses explainable AI techniques to interpret predictions.
-
-    The scheduling results are compared using waiting time,
-    turnaround time and response time.
-    """
-)
-
-st.markdown("---")
-
-
-# =====================================================
-# MODEL PERFORMANCE
-# =====================================================
-
-st.header("2. XGBoost Model Performance")
-
-st.write(
-    "Previously measured model metrics from the notebook:"
-)
-
-m1, m2, m3 = st.columns(3)
-
-m1.metric("MAE", "43.55 seconds")
-m2.metric("RMSE", "55.55 seconds")
-m3.metric("R² Score", "0.9898")
-
-st.caption(
-    "These are the previously recorded evaluation results. "
-    "They are not recalculated from the uploaded CSV files."
-)
-
-st.markdown("---")
-
-
-# =====================================================
-# SCHEDULER METRIC CALCULATION
-# =====================================================
-
-st.header("3. Scheduling Algorithm Comparison")
-
-scheduler_datasets = {
-    "FCFS": fcfs_df,
-    "SJF": sjf_df,
-    "Priority": priority_df,
-    "Round Robin": rr_df,
-    "EPCS": epcs_df
-}
-
-metric_columns = {
-    "Average Waiting Time": "Waiting_Time",
-    "Average Turnaround Time": "Turnaround_Time",
-    "Average Response Time": "Response_Time"
-}
-
-comparison_rows = []
-
-for algorithm, dataframe in scheduler_datasets.items():
-
-    if dataframe is None:
-        continue
-
-    row = {
-        "Algorithm": algorithm,
-        "Jobs": len(dataframe)
+def add_metric_row(name: str, df: pd.DataFrame) -> dict:
+    return {
+        "Algorithm": name,
+        "Jobs": int(len(df)),
+        "Average Waiting Time": mean_metric(df, "Waiting_Time"),
+        "Average Turnaround Time": mean_metric(df, "Turnaround_Time"),
+        "Average Response Time": mean_metric(df, "Response_Time"),
     }
 
-    for metric_name, column_name in metric_columns.items():
 
-        if column_name in dataframe.columns:
-            values = pd.to_numeric(
-                dataframe[column_name],
-                errors="coerce"
-            )
+st.sidebar.header("Dashboard data")
+uploaded = st.sidebar.file_uploader("Upload dashboard_data.zip", type=["zip"])
+if uploaded is None:
+    st.info("Upload your latest `dashboard_data.zip` in the sidebar to open the project dashboard.")
+    st.markdown(
+        "**ZIP should ideally include:** `epcs_results.csv`, `fcfs_results.csv`, "
+        "`sjf_results_713.csv`, `priority_results.csv`, `rr_results.csv`, "
+        "`scheduler_workload.csv`, and `shap_feature_importance.csv`."
+    )
+    st.stop()
 
-            row[metric_name] = values.mean()
+try:
+    files = load_zip_csvs(uploaded.getvalue())
+except zipfile.BadZipFile:
+    st.error("The uploaded file is not a valid ZIP. Re-download dashboard_data.zip from Kaggle and try again.")
+    st.stop()
 
-        else:
-            row[metric_name] = np.nan
+st.success(f"Loaded {len(files)} CSV file(s) successfully.")
+st.sidebar.caption("Files detected")
+for filename in sorted(files):
+    st.sidebar.write(f"✓ {filename}")
 
-    comparison_rows.append(row)
+# Filename lookup: exact preferred, then substring fallback.
+def get_df(exact: str, fallback: str | None = None) -> pd.DataFrame | None:
+    if exact.lower() in files:
+        return files[exact.lower()]
+    if fallback:
+        for name, frame in files.items():
+            if fallback.lower() in name:
+                return frame
+    return None
 
 
-if comparison_rows:
+epcs = get_df("epcs_results.csv", "epcs_results")
+fcfs = get_df("fcfs_results.csv", "fcfs_results")
+sjf = get_df("sjf_results_713.csv", "sjf_results")
+priority = get_df("priority_results.csv", "priority_results")
+rr = get_df("rr_results.csv", "rr_results")
+workload = get_df("scheduler_workload.csv", "scheduler_workload")
+shap_df = get_df("shap_feature_importance.csv", "shap_feature_importance")
+local_shap_df = get_df("shap_local_explanations.csv", "shap_local_explanations")
 
-    comparison_df = pd.DataFrame(comparison_rows)
+schedulers = {
+    "EPCS": epcs,
+    "FCFS": fcfs,
+    "SJF": sjf,
+    "Priority": priority,
+    "Round Robin": rr,
+}
 
-    st.subheader("Average Performance Metrics")
+# ---------- 1. Workload overview ----------
+st.header("1. Workload Overview")
+job_count = len(workload) if workload is not None else (len(epcs) if epcs is not None else 0)
+available_schedulers = sum(df is not None and not df.empty for df in schedulers.values())
+epcs_wait = mean_metric(epcs, "Waiting_Time")
+epcs_tat = mean_metric(epcs, "Turnaround_Time")
+cols = st.columns(4)
+cols[0].metric("Jobs in Workload", f"{job_count:,}" if job_count else "Not loaded")
+cols[1].metric("Algorithms Available", f"{available_schedulers}/5")
+cols[2].metric("EPCS Avg Waiting Time", f"{epcs_wait:.2f}" if np.isfinite(epcs_wait) else "N/A")
+cols[3].metric("EPCS Avg Turnaround Time", f"{epcs_tat:.2f}" if np.isfinite(epcs_tat) else "N/A")
 
-    st.dataframe(
-        comparison_df.round(2),
-        use_container_width=True,
-        hide_index=True
+missing_algorithms = [name for name, df in schedulers.items() if df is None or df.empty]
+if missing_algorithms:
+    st.warning("Missing scheduler result(s): " + ", ".join(missing_algorithms) + ". Check the ZIP file names and contents.")
+
+# ---------- 2. XGBoost metrics ----------
+st.header("2. XGBoost Model Performance")
+st.write("The model predicts job execution time from workload characteristics.")
+metric_cols = st.columns(3)
+metric_cols[0].metric("MAE", "43.55 seconds")
+metric_cols[1].metric("RMSE", "55.55 seconds")
+metric_cols[2].metric("R² score", "0.9898")
+st.caption(
+    "These are the previously reported notebook evaluation values. They are displayed as recorded results; "
+    "this dashboard does not load the trained model or recalculate the scores. Keep this note unless you connect "
+    "and validate the exported model/evaluation artifacts."
+)
+with st.expander("What these model metrics mean"):
+    st.markdown(
+        "- **MAE:** mean absolute difference between predicted and observed execution time.\n"
+        "- **RMSE:** square-root of mean squared prediction error; larger errors receive greater weight.\n"
+        "- **R²:** proportion of target variance explained on the evaluated test set. A high score should still be checked "
+        "with chronological validation and leakage checks for workload-trace data."
     )
 
-    st.subheader("Compare Scheduling Algorithms")
+# ---------- 3. Scheduling comparison ----------
+st.header("3. Scheduling Algorithm Comparison")
+rows = [add_metric_row(name, df) for name, df in schedulers.items() if df is not None and not df.empty]
+if rows:
+    comparison = pd.DataFrame(rows)
+    st.dataframe(comparison.round(3), use_container_width=True, hide_index=True)
 
-    selected_metric = st.selectbox(
-        "Select performance metric",
-        list(metric_columns.keys())
-    )
-
-    chart_data = comparison_df.dropna(
-        subset=[selected_metric]
-    )
-
-    if not chart_data.empty:
-
+    available_metrics = [
+        c for c in ("Average Waiting Time", "Average Turnaround Time", "Average Response Time")
+        if c in comparison.columns and comparison[c].notna().any()
+    ]
+    if available_metrics:
+        metric = st.selectbox("Select performance metric", available_metrics)
+        chart_data = comparison.dropna(subset=[metric])
         fig = px.bar(
             chart_data,
             x="Algorithm",
-            y=selected_metric,
+            y=metric,
             color="Algorithm",
-            text_auto=".2f",
-            title=f"{selected_metric} Comparison",
-            template="plotly_white"
+            text=chart_data[metric].map(lambda x: f"{x:.2f}"),
+            title=f"Algorithm Comparison: {metric}",
+            template="plotly_white",
         )
+        fig.update_layout(showlegend=False, yaxis_title="Average time (same unit as input data)")
+        st.plotly_chart(fig, use_container_width=True)
 
-        fig.update_layout(
-            showlegend=False,
-            xaxis_title="Scheduling Algorithm",
-            yaxis_title="Average Time"
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
-    st.subheader("All Metrics Comparison")
-
-    long_df = comparison_df.melt(
-        id_vars=["Algorithm"],
-        value_vars=list(metric_columns.keys()),
-        var_name="Metric",
-        value_name="Average Time"
-    )
-
-    long_df = long_df.dropna(subset=["Average Time"])
-
-    if not long_df.empty:
-
+        all_long = comparison.melt(
+            id_vars=["Algorithm"], value_vars=available_metrics,
+            var_name="Metric", value_name="Average time"
+        ).dropna(subset=["Average time"])
         fig_all = px.bar(
-            long_df,
-            x="Algorithm",
-            y="Average Time",
-            color="Metric",
-            barmode="group",
-            title="Scheduling Performance Overview",
-            template="plotly_white"
+            all_long, x="Algorithm", y="Average time", color="Metric",
+            barmode="group", title="All Scheduling Metrics", template="plotly_white"
         )
+        st.plotly_chart(fig_all, use_container_width=True)
 
-        st.plotly_chart(
-            fig_all,
-            use_container_width=True
+    if len(comparison) > 1 and comparison["Jobs"].nunique() > 1:
+        st.warning(
+            "The algorithms have different job counts. Do not claim a fair performance comparison until all algorithms "
+            "are run on the same workload and use consistent arrival/burst/priority assumptions."
         )
-
-else:
-
-    st.warning(
-        "No scheduling results found. Check the CSV filenames "
-        "inside dashboard_data.zip."
-    )
-
-
-st.markdown("---")
-
-
-# =====================================================
-# EXPLAINABLE AI — SHAP
-# =====================================================
-
-st.header("4. Explainable AI — SHAP")
-
-st.write(
-    "SHAP feature importance explains which input features "
-    "contribute most to the XGBoost model's execution-time predictions."
-)
-
-if shap_df is not None:
-
-    if {
-        "Feature",
-        "Mean_SHAP_Importance"
-    }.issubset(shap_df.columns):
-
-        shap_df = shap_df.copy()
-
-        shap_df["Mean_SHAP_Importance"] = pd.to_numeric(
-            shap_df["Mean_SHAP_Importance"],
-            errors="coerce"
-        )
-
-        shap_df = shap_df.dropna(
-            subset=["Mean_SHAP_Importance"]
-        )
-
-        shap_df = shap_df.sort_values(
-            "Mean_SHAP_Importance",
-            ascending=False
-        )
-
-        st.subheader("Feature Importance Table")
-
-        st.dataframe(
-            shap_df.round(4),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.subheader("SHAP Feature Importance Chart")
-
-        shap_chart_df = shap_df.sort_values(
-            "Mean_SHAP_Importance",
-            ascending=True
-        )
-
-        fig_shap = px.bar(
-            shap_chart_df,
-            x="Mean_SHAP_Importance",
-            y="Feature",
-            orientation="h",
-            title="Mean Absolute SHAP Importance",
-            labels={
-                "Mean_SHAP_Importance": "Mean |SHAP value|",
-                "Feature": "Input Feature"
-            },
-            template="plotly_white"
-        )
-
-        st.plotly_chart(
-            fig_shap,
-            use_container_width=True
-        )
-
-        if not shap_df.empty:
-
-            top_feature = shap_df.iloc[0]
-
-            st.success(
-                f"Most influential feature in the current SHAP "
-                f"ranking: {top_feature['Feature']}."
+    if epcs is not None and sjf is not None:
+        same_wait = np.isclose(mean_metric(epcs, "Waiting_Time"), mean_metric(sjf, "Waiting_Time"), equal_nan=True)
+        same_tat = np.isclose(mean_metric(epcs, "Turnaround_Time"), mean_metric(sjf, "Turnaround_Time"), equal_nan=True)
+        if same_wait and same_tat:
+            st.warning(
+                "EPCS and SJF currently have identical average waiting and turnaround times to the stored precision. "
+                "This can happen, but inspect the selection/order logic and job-by-job schedules before claiming EPCS improves over SJF."
             )
-
-        st.caption(
-            "Mean absolute SHAP importance measures the average "
-            "magnitude of a feature's contribution. It does not "
-            "show whether that feature increases or decreases "
-            "the prediction."
-        )
-
-    else:
-
-        st.error(
-            "SHAP CSV is missing the required columns: "
-            "Feature and Mean_SHAP_Importance."
-        )
-
 else:
+    st.warning("No scheduler result CSVs were found. Check the ZIP and the expected filenames.")
 
-    st.warning(
-        "shap_feature_importance.csv was not found in the ZIP."
-    )
-
-
-st.markdown("---")
-
-
-# =====================================================
-# WORKLOAD ANALYSIS
-# =====================================================
-
-st.header("5. Workload Analysis")
-
-if workload_df is not None:
-
-    st.subheader("Workload Dataset")
-
-    st.write(f"Total workload records: {len(workload_df):,}")
-
-    st.dataframe(
-        workload_df.head(20),
-        use_container_width=True
-    )
-
-    numeric_columns = workload_df.select_dtypes(
-        include=np.number
-    ).columns.tolist()
-
-    if numeric_columns:
-
-        selected_feature = st.selectbox(
-            "Select a numeric workload feature",
-            numeric_columns
-        )
-
-        feature_df = workload_df[
-            [selected_feature]
-        ].dropna()
-
-        fig_hist = px.histogram(
-            feature_df,
-            x=selected_feature,
-            nbins=30,
-            title=f"Distribution of {selected_feature}",
-            template="plotly_white"
-        )
-
-        st.plotly_chart(
-            fig_hist,
-            use_container_width=True
-        )
-
-        fig_box = px.box(
-            feature_df,
-            y=selected_feature,
-            title=f"Distribution and Outliers: {selected_feature}",
-            template="plotly_white"
-        )
-
-        st.plotly_chart(
-            fig_box,
-            use_container_width=True
-        )
-
-else:
-
-    st.warning("scheduler_workload.csv was not found.")
-
-
-st.markdown("---")
-
-
-# =====================================================
-# JOB EXPLORER
-# =====================================================
-
-st.header("6. Job Explorer")
-
-available_job_data = {
-    name: dataframe
-    for name, dataframe in scheduler_datasets.items()
-    if dataframe is not None
-}
-
-if available_job_data:
-
-    selected_algorithm = st.selectbox(
-        "Choose a scheduler",
-        list(available_job_data.keys()),
-        key="job_explorer_algorithm"
-    )
-
-    job_df = available_job_data[selected_algorithm].copy()
-
-    st.write(
-        f"Showing results for {selected_algorithm}: "
-        f"{len(job_df):,} jobs"
-    )
-
-    search_column = next(
-        (
-            col for col in [
-                "Process_ID",
-                "Job_ID",
-                "Job_ID",
-                "Process_ID"
+# ---------- 4. Job explorer ----------
+st.header("4. Job Explorer")
+choices = {name: df for name, df in schedulers.items() if df is not None and not df.empty}
+if choices:
+    selected_name = st.selectbox("Select scheduling algorithm", list(choices.keys()), key="job_explorer_choice")
+    selected_df = choices[selected_name].copy()
+    st.write(f"Showing {len(selected_df):,} jobs for {selected_name}.")
+    id_col = get_job_id_col(selected_df)
+    if id_col:
+        search_text = st.text_input("Search by Job ID / Process ID")
+        if search_text.strip():
+            selected_df = selected_df[
+                selected_df[id_col].astype(str).str.contains(search_text.strip(), case=False, na=False)
             ]
-            if col in job_df.columns
-        ),
-        None
-    )
-
-    if search_column:
-
-        search_term = st.text_input(
-            "Search for a job ID"
-        )
-
-        if search_term.strip():
-
-            filtered_df = job_df[
-                job_df[search_column]
-                .astype(str)
-                .str.contains(
-                    search_term.strip(),
-                    case=False,
-                    na=False
-                )
-            ]
-
-        else:
-
-            filtered_df = job_df
-
-    else:
-
-        filtered_df = job_df
-
-    st.dataframe(
-        filtered_df.head(200),
-        use_container_width=True,
-        hide_index=True
-    )
-
+    st.dataframe(selected_df.head(500), use_container_width=True, hide_index=True)
     st.download_button(
         "Download displayed job results",
-        data=filtered_df.to_csv(index=False).encode("utf-8"),
-        file_name=f"{selected_algorithm.lower().replace(' ', '_')}_results.csv",
-        mime="text/csv"
+        data=selected_df.to_csv(index=False).encode("utf-8"),
+        file_name=f"{selected_name.lower().replace(' ', '_')}_displayed_results.csv",
+        mime="text/csv",
+    )
+else:
+    st.info("Job-level scheduler results are not available in this ZIP.")
+
+# ---------- 5. Scheduling timeline (numeric time; avoids 1970 date interpretation) ----------
+st.header("5. Scheduling Timeline")
+timeline_choices = {name: df for name, df in schedulers.items() if df is not None and not df.empty}
+if timeline_choices:
+    timeline_name = st.selectbox("Select algorithm for timeline", list(timeline_choices.keys()), key="timeline_choice")
+    timeline_df = timeline_choices[timeline_name].copy()
+    id_col = get_job_id_col(timeline_df)
+    start_col = "Start_Time" if "Start_Time" in timeline_df.columns else None
+    end_col = "Completion_Time" if "Completion_Time" in timeline_df.columns else None
+    if id_col and start_col and end_col:
+        timeline_df[start_col] = pd.to_numeric(timeline_df[start_col], errors="coerce")
+        timeline_df[end_col] = pd.to_numeric(timeline_df[end_col], errors="coerce")
+        timeline_df = timeline_df.dropna(subset=[start_col, end_col]).sort_values(start_col).head(100).copy()
+        timeline_df["Duration"] = timeline_df[end_col] - timeline_df[start_col]
+        timeline_df["Job label"] = timeline_df[id_col].astype(str)
+        timeline_df = timeline_df[timeline_df["Duration"] >= 0]
+        if not timeline_df.empty:
+            fig_timeline = go.Figure()
+            fig_timeline.add_trace(go.Bar(
+                x=timeline_df["Duration"],
+                y=timeline_df["Job label"],
+                base=timeline_df[start_col],
+                orientation="h",
+                name=timeline_name,
+                hovertemplate="Job=%{y}<br>Start=%{base}<br>Duration=%{x}<extra></extra>",
+            ))
+            fig_timeline.update_layout(
+                title=f"{timeline_name} Scheduling Timeline — First 100 Jobs",
+                xaxis_title="Time (numeric units from workload)",
+                yaxis_title="Job",
+                template="plotly_white",
+                height=700,
+            )
+            fig_timeline.update_xaxes(type="linear")
+            fig_timeline.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig_timeline, use_container_width=True)
+        else:
+            st.warning("No valid start/completion times were available for the timeline.")
+    else:
+        st.warning("Timeline needs job ID, Start_Time and Completion_Time columns.")
+
+# ---------- 6. Workload analysis ----------
+st.header("6. Workload Data Analysis")
+if workload is not None and not workload.empty:
+    st.subheader("Dataset Preview")
+    st.dataframe(workload.head(20), use_container_width=True, hide_index=True)
+    numeric_cols = workload.select_dtypes(include=np.number).columns.tolist()
+    if numeric_cols:
+        feat = st.selectbox("Select a numeric workload feature", numeric_cols, key="workload_feature")
+        values = pd.to_numeric(workload[feat], errors="coerce").dropna()
+        fig_hist = px.histogram(values, x=feat, nbins=30, title=f"Distribution of {feat}", template="plotly_white")
+        st.plotly_chart(fig_hist, use_container_width=True)
+        fig_box = px.box(values, y=feat, title=f"Spread of {feat}", template="plotly_white")
+        st.plotly_chart(fig_box, use_container_width=True)
+else:
+    st.warning("scheduler_workload.csv was not found in this ZIP.")
+
+# ---------- 7. Global and local explainability ----------
+st.header("7. Explainable AI — SHAP")
+st.write(
+    "Global SHAP importance summarizes how strongly transformed input features contribute to model predictions on average. "
+    "It does not, by itself, prove why a particular job was selected at one scheduling decision."
+)
+if shap_df is not None and not shap_df.empty:
+    required = {"Feature", "Mean_SHAP_Importance"}
+    if required.issubset(shap_df.columns):
+        shap_plot = shap_df.copy()
+        shap_plot["Mean_SHAP_Importance"] = pd.to_numeric(shap_plot["Mean_SHAP_Importance"], errors="coerce")
+        shap_plot = shap_plot.dropna(subset=["Mean_SHAP_Importance"]).sort_values("Mean_SHAP_Importance", ascending=False)
+        st.subheader("Global Feature Importance")
+        st.dataframe(shap_plot.round(5), use_container_width=True, hide_index=True)
+        fig_shap = px.bar(
+            shap_plot.sort_values("Mean_SHAP_Importance"),
+            x="Mean_SHAP_Importance", y="Feature", orientation="h",
+            title="Mean Absolute SHAP Importance", template="plotly_white",
+            labels={"Mean_SHAP_Importance": "Mean |SHAP value|", "Feature": "Encoded feature"},
+        )
+        st.plotly_chart(fig_shap, use_container_width=True)
+        if not shap_plot.empty:
+            top = shap_plot.iloc[0]
+            st.success(f"Highest global importance in this exported table: {top['Feature']}.")
+        st.caption("Absolute SHAP importance shows contribution magnitude, not whether a feature pushes a prediction up or down.")
+    else:
+        st.error("SHAP CSV must include Feature and Mean_SHAP_Importance columns.")
+else:
+    st.warning("shap_feature_importance.csv is missing. Export it from the Kaggle notebook and add it to the ZIP.")
+
+st.subheader("Per-job explanation")
+if local_shap_df is not None and not local_shap_df.empty:
+    st.success("A local SHAP explanation file was found.")
+    st.dataframe(local_shap_df.head(200), use_container_width=True, hide_index=True)
+else:
+    st.warning(
+        "Per-job SHAP explanations are not yet included. The ZIP currently contains global feature importance only. "
+        "To satisfy the 'why was this job selected?' objective fully, export local SHAP contributions joined to each job ID "
+        "and record the candidate jobs and scheduler decision at each dispatch time."
     )
 
+# ---------- 8. Integrity / scope notes ----------
+st.header("8. Validation Notes")
+if workload is not None and len(workload) and epcs is not None:
+    st.write(f"Workload rows: **{len(workload)}**; EPCS rows: **{len(epcs)}**.")
+    if len(workload) != len(epcs):
+        st.warning("Workload and EPCS row counts differ. Check whether jobs were filtered or omitted.")
 else:
+    st.write("Workload/EPCS row-count validation could not run because one of those files is missing.")
 
-    st.warning("No job-level scheduling results are available.")
-
-
-st.markdown("---")
-
-
-# =====================================================
-# FOOTER
-# =====================================================
-
-st.caption(
-    "Explainable AI CPU Scheduler | XGBoost + SHAP | "
-    "Scheduling Performance Dashboard"
+st.markdown(
+    """
+    **Research/implementation caveats**
+    - Use the same jobs, arrival times, burst-time definition and units for every baseline.
+    - Confirm whether priority number 1 is the highest priority and document Round Robin quantum.
+    - Evaluate prediction with a chronological holdout in addition to a random split where time order matters.
+    - Do not claim EPCS is better solely from a dashboard; show repeated-run statistics or confidence intervals where appropriate.
+    - This prototype visualizes exported CSVs. Live prediction requires exporting/loading the fitted preprocessing pipeline and trained model.
+    """
 )
-
-st.caption(
-    "Interpret algorithm comparisons only after verifying "
-    "that every scheduler used the same workload and consistent "
-    "arrival, burst, priority and scheduling assumptions."
-)
+st.divider()
+st.caption("EPCS | Explainable AI CPU Scheduler | XGBoost + SHAP | Streamlit dashboard")
