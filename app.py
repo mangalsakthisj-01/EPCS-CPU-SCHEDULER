@@ -558,25 +558,25 @@ if not summary.empty:
         )
         fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Time units", xaxis_title="")
         fig.update_traces(textposition="outside", cliponaxis=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_1")
     with p2:
         melt = summary.melt(id_vars=["Algorithm"], value_vars=metric_names, var_name="Metric", value_name="Mean time").dropna()
         fig = px.bar(melt, x="Algorithm", y="Mean time", color="Metric", barmode="group", title="All average time metrics", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
         fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Time units", xaxis_title="")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_2")
     p3, p4 = st.columns(2)
     with p3:
         p95 = summary.dropna(subset=["P95 Waiting Time"]) if "P95 Waiting Time" in summary else pd.DataFrame()
         if not p95.empty:
             fig = px.bar(p95, x="Algorithm", y="P95 Waiting Time", color="Algorithm", title="95th percentile waiting time · tail-delay view", color_discrete_map=COLORS, template=PLOT_TEMPLATE)
             fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Time units")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_3")
     with p4:
         maxwait = summary.dropna(subset=["Maximum Waiting Time"]) if "Maximum Waiting Time" in summary else pd.DataFrame()
         if not maxwait.empty:
             fig = px.bar(maxwait, x="Algorithm", y="Maximum Waiting Time", color="Algorithm", title="Maximum waiting time · worst observed case", color_discrete_map=COLORS, template=PLOT_TEMPLATE)
             fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Time units")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_4")
 
     st.markdown("### Why these results matter — theory in short points")
     theory_items = [
@@ -615,7 +615,7 @@ if epcs is not None and not epcs.empty and job_id_col(epcs):
             if not mp.empty:
                 fig = px.bar(mp, x="Algorithm", y="Time", color="Metric", barmode="group", title=f"Observed alternatives for {chosen}", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Time units")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_5")
             for m in ["Waiting Time", "Turnaround Time", "Response Time"]:
                 valid = mirror.dropna(subset=[m]).sort_values(m)
                 if len(valid):
@@ -654,14 +654,14 @@ if epcs is not None and workload is not None and not epcs.empty and not workload
             with e1:
                 fig = px.histogram(joined, x="Absolute Error", nbins=32, color="Review band", title="Absolute prediction-error distribution", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), xaxis_title="Absolute error")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_6")
             with e2:
                 fig = px.scatter(joined, x=actual_col, y=pred_col, color="Review band", hover_data=[e_id], title="Predicted vs recorded execution time", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
                 low = min(float(joined[actual_col].min()), float(joined[pred_col].min()))
                 high = max(float(joined[actual_col].max()), float(joined[pred_col].max()))
                 fig.add_shape(type="line", x0=low, y0=low, x1=high, y1=high, line=dict(color="#c08a34", dash="dash"))
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), xaxis_title="Recorded time", yaxis_title="Predicted time")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_7")
             st.markdown("**Jobs to review first**")
             st.dataframe(joined.sort_values("Absolute Error", ascending=False)[[e_id,pred_col,actual_col,"Signed Error","Absolute Error"]].head(12).round(3), use_container_width=True, hide_index=True)
             st.markdown(f"<div class='insight'>• The largest absolute error is {joined['Absolute Error'].max():.2f}. The top error tail is selected using this upload's 90th percentile; it is a review heuristic, not a confidence score.</div>", unsafe_allow_html=True)
@@ -693,7 +693,7 @@ if current_workload is not None and previous_workload is not None and not curren
             fig.add_vline(x=.25, line_dash="dash", line_color="#c08a34", annotation_text="moderate")
             fig.add_vline(x=.5, line_dash="dot", line_color="#c56856", annotation_text="large")
             fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_8")
             st.dataframe(nshift.sort_values("Abs shift", ascending=False).round(3), use_container_width=True, hide_index=True)
         else:
             st.info("No shared numeric columns were suitable for shift comparison.")
@@ -701,7 +701,7 @@ if current_workload is not None and previous_workload is not None and not curren
         if not cshift.empty:
             fig = px.bar(cshift.sort_values("Mix change (0–1)"), x="Mix change (0–1)", y="Feature", orientation="h", title="Categorical composition change (0–1)", template=PLOT_TEMPLATE, color_discrete_sequence=["#247c78"])
             fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_9")
             st.dataframe(cshift.sort_values("Mix change (0–1)", ascending=False).round(3), use_container_width=True, hide_index=True)
         else:
             st.info("No shared categorical columns were suitable for shift comparison.")
@@ -716,11 +716,11 @@ else:
             with left:
                 fig = px.histogram(vals.to_frame(name=col), x=col, nbins=30, title=f"Distribution of {col}", template=PLOT_TEMPLATE, color_discrete_sequence=["#247c78"])
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_10")
             with right:
                 fig = px.box(vals.to_frame(name=col), y=col, points="outliers", title=f"Spread and outliers: {col}", template=PLOT_TEMPLATE, color_discrete_sequence=["#447da2"])
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_11")
 
 # -------------------------- 7 New idea: Fairness ---------------------------
 st.divider()
@@ -745,7 +745,7 @@ if fair_source is not None and canonical_time_col(fair_source, "waiting"):
             fig = px.histogram(fair_df, x=wcol, nbins=32, title="EPCS waiting-time distribution", template=PLOT_TEMPLATE, color_discrete_sequence=["#447da2"])
             fig.add_vline(x=q95, line_dash="dash", line_color="#c56856", annotation_text="P95")
             fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), xaxis_title="Waiting time")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_12")
         with wr:
             group_col = canonical_time_col(fair_df, "job_type") or canonical_time_col(fair_df, "priority")
             if group_col:
@@ -753,7 +753,7 @@ if fair_source is not None and canonical_time_col(fair_source, "waiting"):
                 grouped = grouped.rename(columns={group_col:"Group","mean":"Mean wait","median":"Median wait","max":"Maximum wait","count":"Jobs"})
                 fig = px.bar(grouped, x="Group", y="Mean wait", color="Group", title=f"Mean waiting time by {group_col}", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
                 fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), xaxis_title="")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_13")
                 st.dataframe(grouped.round(3), use_container_width=True, hide_index=True)
             else:
                 st.info("Add Job_Type or Priority_Number to EPCS results to compare waiting-time groups.")
@@ -793,7 +793,7 @@ if not summary.empty and all(m in summary.columns for m in metric_names):
         norm = norm.sort_values("Weighted score (lower is better)")
         fig = px.bar(norm, x="Algorithm", y="Weighted score (lower is better)", color="Algorithm", title="Goal-weighted policy ranking (relative score)", color_discrete_map=COLORS, template=PLOT_TEMPLATE, text=norm["Weighted score (lower is better)"].map(lambda x:f"{x:.3f}"))
         fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Relative normalized score (lower is better)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_14")
         st.dataframe(norm[["Algorithm",*metric_names,"Weighted score (lower is better)"]].round(3), use_container_width=True, hide_index=True)
         winner = norm.iloc[0]
         st.markdown(f"<div class='insight'>• With the selected weights (waiting {weights[0]*100:.0f}%, turnaround {weights[1]*100:.0f}%, response {weights[2]*100:.0f}%), the lowest weighted score is <b>{winner['Algorithm']}</b>. This is a transparent preference-based recommendation, not proof of universal superiority.</div>", unsafe_allow_html=True)
@@ -838,12 +838,12 @@ if workload is not None and not workload.empty:
             st.dataframe(all_stress.round(3), use_container_width=True, hide_index=True)
             fig = px.bar(all_stress, x="Algorithm", y="Average Waiting Time", color="Algorithm", title="Stress scenario · average waiting time", color_discrete_sequence=EXTRA_COLORS, template=PLOT_TEMPLATE)
             fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Mean waiting time")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_15")
         rr_curve = pd.DataFrame(rr_rows)
         rr_curve["Quantum / median burst"] = quantum_factors
         fig = px.line(rr_curve, x="Quantum / median burst", y=["Average Waiting Time","Average Turnaround Time","Average Response Time"], markers=True, title="Round Robin quantum sensitivity", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
         fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), yaxis_title="Mean time", xaxis_title="Quantum as a fraction of median burst")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_16")
         st.markdown("<div class='insight insight-warn'>• Scope limit: this sandbox simulates FCFS, non-preemptive SJF, non-preemptive Priority and Round Robin from workload columns. It does not re-run the learned EPCS policy because this ZIP contains result CSVs, not the fitted model plus the exact EPCS dispatch implementation. Do not label these stress results as EPCS performance.</div>", unsafe_allow_html=True)
     else:
         st.warning("Stress Lab needs Arrival_Time and Burst_Time (or another documented execution-time column) in scheduler_workload.csv.")
@@ -863,24 +863,24 @@ if workload is not None and not workload.empty:
         with p1:
             fig = px.histogram(series.to_frame(name=feature), x=feature, nbins=32, title=f"Distribution of {feature}", template=PLOT_TEMPLATE, color_discrete_sequence=["#247c78"])
             fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_17")
         with p2:
             fig = px.box(series.to_frame(name=feature), y=feature, points="outliers", title=f"Spread and outliers: {feature}", template=PLOT_TEMPLATE, color_discrete_sequence=["#447da2"])
             fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_18")
     cat_cols = [col for col in workload.columns if (workload[col].dtype == object or str(workload[col].dtype).startswith("category")) and 1 < workload[col].nunique(dropna=True) <= 40]
     if cat_cols:
         cat_feature = st.selectbox("Categorical feature", cat_cols, key="workload_category")
         counts = workload[cat_feature].fillna("Missing").astype(str).value_counts().rename_axis(cat_feature).reset_index(name="Jobs")
         fig = px.bar(counts, x=cat_feature, y="Jobs", color=cat_feature, title=f"Workload composition: {cat_feature}", template=PLOT_TEMPLATE, color_discrete_sequence=EXTRA_COLORS)
         fig.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_19")
     corr_df = workload.select_dtypes(include=np.number)
     if corr_df.shape[1] >= 2:
         corr = corr_df.corr(numeric_only=True)
         fig = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1, title="Numeric feature correlation (association, not causation)", template=PLOT_TEMPLATE)
         fig.update_layout(margin=dict(l=10,r=10,t=60,b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="epcs_chart_20")
         st.markdown("<div class='insight'>• Correlation describes linear association among numeric columns. It cannot by itself prove that one feature causes longer execution time or changes a scheduler decision.</div>", unsafe_allow_html=True)
     # Dataset-specific profile notes
     profile_notes = []
@@ -922,7 +922,7 @@ else:
                 height=max(420, ((len(all_num_cols) + 2) // 3) * 245),
                 showlegend=False, margin=dict(l=10,r=10,t=65,b=10),
             )
-            st.plotly_chart(fig_all, use_container_width=True)
+            st.plotly_chart(fig_all, use_container_width=True, key="epcs_chart_21")
 
         stats = workload[all_num_cols].describe().T.reset_index().rename(columns={"index":"Feature"})
         stats["Missing values"] = workload[all_num_cols].isna().sum().values
@@ -948,7 +948,7 @@ else:
                         color_discrete_sequence=EXTRA_COLORS,
                     )
                     fig_cat_all.update_layout(showlegend=False, margin=dict(l=10,r=10,t=60,b=10), xaxis_title="")
-                    st.plotly_chart(fig_cat_all, use_container_width=True)
+                    st.plotly_chart(fig_cat_all, use_container_width=True, key="epcs_chart_22")
 
 # ----------------------------- 11 SHAP -------------------------------------
 st.divider()
@@ -967,7 +967,7 @@ if shap_df is not None and not shap_df.empty:
             with right:
                 fig = px.bar(shap_view.sort_values(importance_col), x=importance_col, y=feat_col, orientation="h", title="Global feature importance · mean |SHAP|", template=PLOT_TEMPLATE, color=importance_col, color_continuous_scale=[[0,"#d7e7eb"],[.5,"#75aaa9"],[1,"#245a7a"]])
                 fig.update_layout(margin=dict(l=10,r=10,t=60,b=10), xaxis_title="Mean absolute SHAP value", yaxis_title="Feature")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="epcs_chart_23")
             top = shap_view.iloc[0]
             st.markdown(f"<div class='insight'>• Top global feature by the supplied SHAP importance table: <b>{top[feat_col]}</b>. Mean absolute SHAP reports contribution magnitude, not whether that feature increases or decreases a specific prediction.</div>", unsafe_allow_html=True)
             st.markdown("**Theory notes**")
@@ -1000,7 +1000,7 @@ if available:
             fig = go.Figure(go.Bar(x=timeline["Duration"], y=timeline["Job label"], base=timeline[start_col], orientation="h", marker_color="#247c78", hovertemplate="Job %{y}<br>Start %{base}<br>Duration %{x}<extra></extra>"))
             fig.update_layout(title=f"{alg_choice} · first 100 recorded intervals", xaxis_title="Time units", yaxis_title="Job", template=PLOT_TEMPLATE, height=620, margin=dict(l=10,r=10,t=60,b=10))
             fig.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="epcs_chart_24")
         else:
             st.info("No valid timeline rows were found.")
     else:
